@@ -14,14 +14,15 @@ class MessageClient:
         self.port = options['port'] if options.get('port') else 31337
         self.probe_number = options['probe_number'] if options.get('probe_number') else 10
         # Initialize the socket
-        client_address = ""
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.sock.bind((client_address, self.port))
         self.sock.settimeout(self.timeout)
+
+    def __del__(self):
+        self.sock.close
 
     def wait_for_acknowledgement(self, sequence_number):
         """ Waits for the acknowledgement message of appropriate sequence number.
-        Accepts an integer sequence number and returns whether message was acknowledged and RTT for message."""
+        Accepts an integer sequence number and returns whether message was acknowledged in time and RTT for message."""
         start_time = time.time()  # start timer
         try:
             data, addr = self.sock.recvfrom(1024)  # listen for ack from server
