@@ -3,46 +3,54 @@ import pickle
 import time
 from message import Message
 
-probe_number = 10
-timeout = 2
+class MessageClient:
+    """ A client to send messages and measure RTT of messages. """
+    def __init__(self, server_address, **options):
+        """ Initializes the socket and client parameters.
+        Constructor accepts a server address and options (timeout=int, port=int, probe_number=int) """
+        # Initialize the client parameters
+        self.server_address = server_address
+        self.timeout = options['timeout'] if options.get('timeout') else 2
+        self.port = options['port'] if options.get('port') else 31337
+        self.probe_number = options['probe_number'] if options.get('probe_number') else 10
+        # Initialize the socket
+        client_address = ""
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock.bind((client_address, self.port))
+        self.sock.settimeout(self.timeout)
 
-client_address = "127.0.0.1"
-server_address = "192.168.1.8"
+    def wait_for_acknowledgement(self, sequence_number):
+        """ Waits for the acknowledgement message of appropriate sequence number.
+        Accepts an integer sequence number and returns whether message was acknowledged and RTT for message."""
+        start_time = time.time()  # start timer
+        try:
+            data, addr = self.sock.recvfrom(1024)  # listen for ack from server
+            received_sequence_number = data.decode("utf-8")
+            if int(received_sequence_number) == sequence_number:
+                return True, (time.time() - start_time)  # return true and RTT
+        except Exception:
+            print("Request timed out/incoming message corrupt")  # If try failed, either timeout or garbage received
+            return False, (time.time() - start_time)
 
-port = 31337
+    def send_message(self, message):
+        """ Sends a message to the server.  Accepts a message object and returns RTT of message. """
+        while not message.acknowledged:
+            self.sock.sendto(pickle.dumps(message), (self.server_address, self.port))  # send message
+            message.acknowledged, RTT = self.wait_for_acknowledgement(message.sequence_number)  # wait for ack
+        return RTT  # once message is acknowledged, return RTT of message
 
-sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-sock.bind((client_address, port))
-sock.settimeout(timeout)
+    def create_and_send_message(self, sequence_number):
+        """ Accepts a sequence number integer and returns RTT for message sent."""
+        message = Message(sequence_number)  # create a message object with appropriate sequence number
+        RTT = self.send_message(message)  # send message
+        print("Packet", sequence_number, "RTT:", RTT, "seconds")
+        return RTT
 
-def wait_for_acknowledgement(sequence_number):
-    start_time = time.time()
-    try:
-        data, addr = sock.recvfrom(1024)
-        received_sequence_number = data.decode("utf-8")
-        if int(received_sequence_number) == sequence_number:
-            return True, (time.time() - start_time)
-    except Exception:
-        print("Request timed out")
-        return False, (time.time() - start_time)
-
-
-def send_message():
-    message_acknowledged = False
-    RTT = 0
-    while not message_acknowledged:
-        sock.sendto(pickle.dumps(message), (server_address, port))
-        message_acknowledged, RTT = wait_for_acknowledgement(message.sequence_number)
-    return RTT
-
-RTT_Array = []
-
-for sequence_number in range(0, probe_number):
-    message = Message(sequence_number)
-    RTT = send_message()
-    print("Packet", sequence_number, "RTT:", RTT, "seconds")
-    RTT_Array.append(RTT)
-
-average_RTT = sum(RTT_Array)/len(RTT_Array)
-print("\nAverage RTT between local and", server_address, ":", average_RTT)
-
+    def measure_RTT(self):
+        """ Creates and sends a sequence of messages and returns the average RTTs of those messages. """
+        # send a sequence of messages and measure RTTs for each
+        print("\nMeasuring Average RTT to", self.server_address)
+        RTT_Array = [self.create_and_send_message(sequence_number) for sequence_number in range(0, self.probe_number)]
+        average_RTT = sum(RTT_Array)/len(RTT_Array)  # calculate average RTT
+        print("\nAverage RTT between local and", self.server_address, ":", average_RTT, "\n")
+        return average_RTT
